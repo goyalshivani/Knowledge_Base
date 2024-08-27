@@ -4,16 +4,68 @@
 # https://aka.ms/yaml
 
 trigger:
-- main
+- master
+- dev
 
 pool:
-  vmImage: ubuntu-latest
+  name: 'Pool_1'
 
-steps:
-- script: echo Hello, world!
-  displayName: 'Run a one-line script'
+stages:
+- stage: Build
+  jobs:
+  - job: BuildAndTest
+    steps:
+    - task: UseDotNet@2
+      inputs:
+        packageType: sdk
+        version: '6.x' # Adjust this to your .NET version
+        installationPath: $(Agent.ToolsDirectory)/dotnet
 
-- script: |
-    echo Add other tasks to build, test, and deploy your project.
-    echo See https://aka.ms/yaml
-  displayName: 'Run a multi-line script'
+    - task: DotNetCoreCLI@2
+      inputs:
+        command: 'restore'
+        projects: '**/*.csproj'
+
+    - task: DotNetCoreCLI@2
+      inputs:
+        command: 'build'
+        projects: '**/*.csproj'
+        arguments: '--configuration Release'
+
+    - task: DotNetCoreCLI@2
+      inputs:
+        command: 'publish'
+        projects: '**/*.csproj'
+        arguments: '--configuration Release --output $(Build.ArtifactStagingDirectory)'
+
+    - task: PublishPipelineArtifact@1
+      inputs:
+        targetPath: '$(Build.ArtifactStagingDirectory)'
+        artifact: 'drop'
+
+    - task: SonarCloud@1
+      inputs:
+        sonarCloud: '<SonarCloud-Service-Connection>'
+        organization: '<Your-SonarCloud-Organization>'
+        scannerMode: 'MSBuild'
+        projectKey: '<Your-Project-Key>'
+        projectName: '<Your-Project-Name>'
+        extraProperties: |
+          sonar.verbose=true
+
+- stage: Deploy
+  dependsOn: Build
+  jobs:
+  - job: DeployToAppService
+    steps:
+    - task: DownloadPipelineArtifact@2
+      inputs:
+        artifactName: 'drop'
+        downloadPath: '$(Pipeline.Workspace)'
+
+    - task: AzureWebApp@1
+      inputs:
+        azureSubscription: '<Azure-Service-Connection>'
+        appName: '<Your-App-Service-Name>'
+        package: '$(Pipeline.Workspace)/drop/*.zip'
+        deploymentMethod: 'zipDeploy'
